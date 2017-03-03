@@ -194,8 +194,36 @@ public class EddaASGJanitorCrawler implements JanitorCrawler {
         if (maxSize != null) {
             resource.setAdditionalField(ASG_FIELD_MAX_SIZE, String.valueOf(maxSize.getIntValue()));
         }
-        // Adds instances and ELBs as additional fields.
-        JsonNode instances = jsonNode.get("instances");
+ 
+        addInstancesAndELBS(resource, jsonNode, lcNameToCreationTime);
+        setFieldForTime(resource, jsonNode, region, asgName);
+        return resource;
+    }
+
+    private void setFieldForTime(Resource resource, JsonNode jsonNode, String region, String asgName) {
+		// TODO Auto-generated method stub
+    	   JsonNode suspendedProcesses = jsonNode.get("suspendedProcesses");
+           for (Iterator<JsonNode> it = suspendedProcesses.getElements(); it.hasNext();) {
+               JsonNode sp = it.next();
+               if ("AddToLoadBalancer".equals(sp.get("processName").getTextValue())) {
+                   String suspensionTime = getSuspensionTimeString(sp.get("suspensionReason").getTextValue());
+                   if (suspensionTime != null) {
+                       LOGGER.info(String.format("Suspension time of ASG %s is %s",
+                               asgName, suspensionTime));
+                       resource.setAdditionalField(ASG_FIELD_SUSPENSION_TIME, suspensionTime);
+                       break;
+                   }
+               }
+           }
+           Long lastChangeTime = regionToAsgToLastChangeTime.get(region).get(asgName);
+           if (lastChangeTime != null) {
+               resource.setAdditionalField(ASG_FIELD_LAST_CHANGE_TIME, String.valueOf(lastChangeTime));
+           }        
+
+       }
+		
+	private void addInstancesAndELBS(Resource resource, JsonNode jsonNode, Map<String, Long> lcNameToCreationTime) {
+    	JsonNode instances = jsonNode.get("instances");
         resource.setDescription(String.format("%d instances", instances.size()));
         List<String> instanceIds = Lists.newArrayList();
         for (Iterator<JsonNode> it = instances.getElements(); it.hasNext();) {
@@ -220,29 +248,9 @@ public class EddaASGJanitorCrawler implements JanitorCrawler {
                 resource.setAdditionalField(ASG_FIELD_LC_CREATION_TIME, String.valueOf(lcCreationTime));
             }
         }
-        // sets the field for the time when the ASG's traffic is suspended from ELB
-        JsonNode suspendedProcesses = jsonNode.get("suspendedProcesses");
-        for (Iterator<JsonNode> it = suspendedProcesses.getElements(); it.hasNext();) {
-            JsonNode sp = it.next();
-            if ("AddToLoadBalancer".equals(sp.get("processName").getTextValue())) {
-                String suspensionTime = getSuspensionTimeString(sp.get("suspensionReason").getTextValue());
-                if (suspensionTime != null) {
-                    LOGGER.info(String.format("Suspension time of ASG %s is %s",
-                            asgName, suspensionTime));
-                    resource.setAdditionalField(ASG_FIELD_SUSPENSION_TIME, suspensionTime);
-                    break;
-                }
-            }
-        }
-        Long lastChangeTime = regionToAsgToLastChangeTime.get(region).get(asgName);
-        if (lastChangeTime != null) {
-            resource.setAdditionalField(ASG_FIELD_LAST_CHANGE_TIME, String.valueOf(lastChangeTime));
-        }
-        return resource;
+	}
 
-    }
-
-    private Map<String, Long> getLaunchConfigCreationTimes(String region) {
+	private Map<String, Long> getLaunchConfigCreationTimes(String region) {
         LOGGER.info(String.format("Getting launch configuration creation times in region %s", region));
 
         String url = eddaClient.getBaseUrl(region)
